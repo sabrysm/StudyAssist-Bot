@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from discord.ext import commands
 import discord
 import config
@@ -14,8 +12,8 @@ class Bot(commands.Bot):
                 await self.load_extension(cog)
             except Exception as exc:
                 print(f'Could not load extension {cog} due to {exc.__class__.__name__}: {exc}')
-        
-        await self.bot.sync()
+
+        await self.tree.sync(guild=discord.Object(id=config.guild_id))
 
     async def on_ready(self):
         print(f'Logged on as {self.user} (ID: {self.user.id})')
