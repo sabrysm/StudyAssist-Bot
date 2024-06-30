@@ -6,7 +6,7 @@ import config
 
 class Bot(commands.Bot):
     def __init__(self, intents: discord.Intents, **kwargs):
-        super().__init__(command_prefix=commands.when_mentioned_or('$'), intents=intents, **kwargs)
+        super().__init__(command_prefix=commands.when_mentioned_or(config.prefix), intents=intents, **kwargs)
 
     async def setup_hook(self):
         for cog in config.cogs:
@@ -14,6 +14,8 @@ class Bot(commands.Bot):
                 await self.load_extension(cog)
             except Exception as exc:
                 print(f'Could not load extension {cog} due to {exc.__class__.__name__}: {exc}')
+        
+        await self.bot.sync()
 
     async def on_ready(self):
         print(f'Logged on as {self.user} (ID: {self.user.id})')
