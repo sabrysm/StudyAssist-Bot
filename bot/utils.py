@@ -2,10 +2,9 @@ import discord
 from discord.ext import commands
 from discord.app_commands import Group
 import aiosqlite
-from datetime import datetime
-
-
-study = Group(name='study', description='Study commands')
+from datetime import datetime, timedelta
+from typing import List
+import pytz
 
 class TimeCalculations:
     @staticmethod
@@ -22,23 +21,94 @@ class TimeCalculations:
         """
         return int((current_time - start_time).total_seconds())
 
-class Topic:
-    def __init__(self, name, description, author_id, guild_id):
-        self.name = name
-        self.description = description
-        self.author_id = author_id
-        self.guild_id = guild_id
+    @staticmethod
+    def minutesToText(minutes: int) -> str:
+        """
+        Convert minutes to hours and minutes
+        
+        Parameters:
+            minutes (int): The number of minutes
+            
+        Returns:
+            str: The time in hours and minutes
+        """
+        hours = minutes // 60
+        minutes = minutes % 60
+        return f'{hours} hours {minutes} minutes' if hours > 0 else f'{minutes} minutes'
     
     @staticmethod
+    def minutesToDateTime(minutes: int) -> datetime:
+        """
+        Convert minutes to datetime
+        
+        Parameters:
+            minutes (int): The number of minutes
+            
+        Returns:
+            datetime: The datetime object
+        """
+        return discord.utils.utcnow() + timedelta(minutes=minutes)
+    
+    @staticmethod
+    def remainingTime(start_time: str, current_time: str) -> int:
+        """
+        Calculate the remaining time between the start time and the current time
+        
+        Parameters:
+            start_time (str): The start time
+            current_time (str): The current time
+            
+        Returns:
+            int: The remaining time in minutes
+        """
+        start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+        current_time = datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')
+        return int((start_time - current_time).total_seconds() // 60)
+    
+    @staticmethod
+    async def datetimeToSeconds(datetime_str: str) -> int:
+        """
+        Convert a datetime string to seconds
+        
+        Parameters:
+            datetime_str (str): The datetime string
+            
+        Returns:
+            int: The seconds
+        """
+        return int((datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S') - datetime.strptime(discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S'), '%Y-%m-%d %H:%M:%S')).total_seconds())
+
+class Topic:
+    def __init__(self, name, author_id, guild_id):
+        self.name = name
+        self.author_id = author_id
+        self.guild_id = guild_id
+
+    async def insertTopicToDatabase(self, start_time: datetime=None, duration: int=0):
+        current_time = discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        start_time = start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else current_time
+        print(f"Start time: {start_time}, Current time: {current_time}")
+        status = 'active' if start_time <= current_time else 'upcoming'
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                INSERT INTO topics (name, status, start_time, duration, author_id, guild_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (self.name, status, start_time, duration, self.author_id, self.guild_id))
+            await db.commit()
+
+    @staticmethod
     async def createTablesIfNotExists():
+        """
+        Create the tables if they do not exist
+        """
         async with aiosqlite.connect('study.db') as db:
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS topics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'active',
+                    status TEXT NOT NULL DEFAULT 'upcoming',
                     start_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    duration INTEGER NOT NULL DEFAULT 0,
                     author_id INTEGER NOT NULL,
                     guild_id INTEGER NOT NULL
                 )
@@ -52,19 +122,28 @@ class Topic:
                 )
             ''')
             await db.commit()
-
-
-    async def insertTopicToDatabase(self):
+    
+    @staticmethod
+    async def getActiveTopics():
+        await Topic.createTablesIfNotExists()
         async with aiosqlite.connect('study.db') as db:
-            await db.execute('''
-                INSERT INTO topics (name, description, author_id, guild_id)
-                VALUES (?, ?, ?, ?)
-            ''', (self.name, self.description, self.author_id, self.guild_id))
-            await db.commit()
-            
-            
+            async with db.execute('''
+                SELECT * FROM topics WHERE status='active'
+            ''') as cursor:
+                return await cursor.fetchall()
+    
+    @staticmethod
+    async def getUpcomingTopics():
+        await Topic.createTablesIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topics WHERE status='upcoming'
+            ''') as cursor:
+                return await cursor.fetchall()
+        
     @staticmethod
     async def getTopics():
+        await Topic.createTablesIfNotExists()
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
                 SELECT * FROM topics
@@ -73,6 +152,27 @@ class Topic:
             
     @staticmethod
     async def joinTopic(topic_name, user_id):
+        await Topic.createTablesIfNotExists()
+        await Topic.insertTopicMember(topic_name, user_id)
+    
+    @staticmethod
+    async def checkIfAlreadyJoined(topic_name, user_id):
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topic_members WHERE topic_name=? AND user_id=?
+            ''', (topic_name, user_id)) as cursor:
+                return await cursor.fetchone() is not None
+    
+    @staticmethod
+    async def checkIfAuthor(topic_name, author_id):
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topics WHERE name=? AND author_id=?
+            ''', (topic_name, author_id)) as cursor:
+                return await cursor.fetchone() is not None
+    
+    @staticmethod
+    async def insertTopicMember(topic_name, user_id):
         async with aiosqlite.connect('study.db') as db:
             await db.execute('''
                 INSERT INTO topic_members (topic_name, user_id)
@@ -81,7 +181,8 @@ class Topic:
             await db.commit()
     
     @staticmethod
-    async def getTopicMembers(topic_name):
+    async def getTopicMembers(topic_name) -> List[aiosqlite.Row]:
+        await Topic.createTablesIfNotExists()
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
                 SELECT * FROM topic_members WHERE topic_name=?
@@ -89,22 +190,176 @@ class Topic:
                 return await cursor.fetchall()
     
     @staticmethod
-    async def getTopicByName(name):
+    async def getTopicByName(topic_name: str) -> aiosqlite.Row:
+        await Topic.createTablesIfNotExists()
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
                 SELECT * FROM topics WHERE name=?
-            ''', (name,)) as cursor:
+            ''', (topic_name,)) as cursor:
                 return await cursor.fetchone()
     
     @staticmethod
-    async def createTopicEmbed(topic: aiosqlite.Row):
-        embed = discord.Embed(title=topic['name'], description=topic['description'], color=discord.Color.green())
-        members = await Topic.getTopicMembers(topic['name'])
-        embed.add_field(name="Host", value=f"<@{topic['author_id']}>")
-        embed.add_field(name="Members", value="\n".join([f"<@{member['user_id']}>" for member in members]))
-        embed.set_footer(text=f"Created by {topic['author_id']}")
+    async def activeOrUpcomingTopicExists(topic_name: str) -> bool:
+        await Topic.createTablesIfNotExists()
+        return await Topic.getActiveOrUpcomingTopicByName(topic_name) is not None
+    
+    @staticmethod
+    async def getActiveOrUpcomingTopicByName(topic_name: str) -> aiosqlite.Row:
+        await Topic.createTablesIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topics WHERE name=? AND (status='active' OR status='upcoming')
+            ''', (topic_name,)) as cursor:
+                return await cursor.fetchone()
+    
+    @staticmethod
+    async def endTopic(topic_name: str, author_id: int):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                UPDATE topics
+                SET status='ended'
+                WHERE name=? AND author_id=? AND (status='active' OR status='upcoming')
+            ''', (topic_name, author_id))
+            await db.commit()
+    
+    @staticmethod
+    async def isTopicStarted(topic_name: str) -> bool:
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT status FROM topics WHERE name=? ORDER BY id DESC LIMIT 1
+            ''', (topic_name,)) as cursor:
+                topic = await cursor.fetchone()
+                return topic[0] == 'active'
+    
+    @staticmethod
+    async def isTopicEnded(topic_name: str) -> bool:
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT status FROM topics WHERE name=?
+            ''', (topic_name,)) as cursor:
+                topic = await cursor.fetchone()
+                return topic[0] == 'ended'
+    
+    @staticmethod
+    async def createTopicEmbed(topic: aiosqlite.Row, end=False):
+        print(topic)
+        embed = discord.Embed(title=f"Session:\n{topic[1]}", color=discord.Color.green() if not end else discord.Color.dark_orange())
+        members = await Topic.getTopicMembers(topic[1])
+        topic_started = await Topic.isTopicStarted(topic[1])
+        start_time = topic[3]
+        start_time_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+        start_time_dt_utc = start_time_dt.replace(tzinfo=pytz.utc)
+        time_remaining = discord.utils.format_dt(start_time_dt_utc, 'R')
+        end_time_dt = start_time_dt + timedelta(minutes=topic[4])
+        end_time_dt_utc = end_time_dt.replace(tzinfo=pytz.utc)
+        time_since_end = discord.utils.format_dt(end_time_dt_utc, 'R')
+        status = 'Starting' if not topic_started else 'Started'
+        status = 'Ended' if end else status
+        if topic_started:
+            embed.add_field(name="Status", value="Active", inline=False)
+        else:
+            embed.add_field(name=f"Status", value=f"{status} {time_remaining if not end else time_since_end}", inline=False)
+        if topic[4] > 0:
+            embed.add_field(name="Duration", value=TimeCalculations.minutesToText(topic[4]), inline=False)
+        embed.add_field(name="Host", value=f"<@{topic[5]}>", inline=False)
+        if len(members) > 0:
+            embed.add_field(name="Members", value="\n".join([f"<@{member[2]}>" for member in members]), inline=False)
+        else:
+            embed.add_field(name="Members", value="No members joined yet", inline=False)
+        embed.add_field(name="** **", value=f"Start time: {discord.utils.format_dt(start_time_dt_utc, 'f')} in your timezone", inline=False)
         return embed
     
+    @staticmethod
+    async def startTopic(topic_name: str, author_id: int):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                UPDATE topics
+                SET status='active'
+                WHERE name=? AND author_id=? AND status='upcoming'
+            ''', (topic_name, author_id))
+            await db.commit()
+    
+    @staticmethod
+    async def getDetails(topic_name: str):
+        await Topic.createTablesIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topics WHERE name=? AND (status='active' OR status='upcoming')
+            ''', (topic_name,)) as cursor:
+                return await cursor.fetchone()
+    
+    @staticmethod
+    async def leaveTopic(topic_name: str, user_id: int):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                DELETE FROM topic_members
+                WHERE topic_name=? AND user_id=?
+            ''', (topic_name, user_id))
+            await db.commit()
+
+class Check:
+    @staticmethod
+    async def checkStartTimes():
+        """
+        Check the starting times for upcoming topics
+        
+        Parameters:
+            bot (commands.Bot): The bot instance
+            
+        Returns:
+            None
+        """
+        upcoming_topics = await Topic.getUpcomingTopics()
+        for topic in upcoming_topics:
+            start_time = topic[3]
+            current_time = discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            if start_time <= current_time:
+                print(f"Starting topic: {topic[1]}")
+                await Topic.startTopic(topic[1], topic[5])
+    
+    @staticmethod
+    async def checkEndTimes():
+        """
+        Check the ending times for active topics
+        
+        Parameters:
+            bot (commands.Bot): The bot instance
+            
+        Returns:
+            None
+        """
+        active_topics = await Topic.getActiveTopics()
+        for topic in active_topics:
+            start_time = topic[3]
+            duration = topic[4]
+            if duration == 0:
+                continue
+            current_time = discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            # Check if the duration has passed
+            if TimeCalculations.timeDifference(datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S'), datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')) >= duration * 60:
+                print(f"Ending topic: {topic[1]}")
+                await Topic.endTopic(topic[1], topic[5])
+
+class Utils:
+    @staticmethod
+    def parseCreateArgs(args):
+        """
+        Parse the arguments for the create command
+        
+        Parameters:
+            args (tuple): The arguments
+            
+        Returns:
+            tuple: The topic name, start time, and duration
+        """
+        numbers = [arg for arg in args if arg.isdigit()]
+        topic_name = "".join([arg + " " for arg in args if not arg.isdigit()]).strip()
+        topic_name = topic_name + "".join([f" {num}" for num in numbers[:-2]])
+        args = [topic_name] + [int(num) for num in numbers[-2:]] if numbers else [topic_name, 0, 0]
+        start_time = numbers[0] if len(numbers) > 0 else 0
+        duration = numbers[1] if len(numbers) > 1 else 0
+        return topic_name, start_time, duration
+
 class Attendance:
     @staticmethod
     async def createTableIfNotExists():

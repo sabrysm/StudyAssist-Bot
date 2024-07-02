@@ -10,6 +10,7 @@ class Bot(commands.Bot):
         for cog in config.cogs:
             try:
                 await self.load_extension(cog)
+                print(f'Loaded extension {cog}')
             except Exception as exc:
                 print(f'Could not load extension {cog} due to {exc.__class__.__name__}: {exc}')
 
@@ -17,8 +18,8 @@ class Bot(commands.Bot):
 
     async def on_ready(self):
         print(f'Logged on as {self.user} (ID: {self.user.id})')
-
-
+    
+    
 intents = discord.Intents.default()
 intents.message_content = True
 bot = Bot(intents=intents)
