@@ -250,11 +250,9 @@ class Topic:
         start_time_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
         start_time_dt_utc = start_time_dt.replace(tzinfo=pytz.utc)
         time_remaining = discord.utils.format_dt(start_time_dt_utc, 'R')
-        end_time_dt = start_time_dt + timedelta(minutes=topic[4])
-        end_time_dt_utc = end_time_dt.replace(tzinfo=pytz.utc)
-        time_since_end = discord.utils.format_dt(end_time_dt_utc, 'R')
+        time_since_end = discord.utils.format_dt(discord.utils.utcnow(), 'R')
         status = 'Starting' if not topic_started else 'Started'
-        status = 'Ended' if end else status
+        status = 'Ended by author' if end else status
         if topic_started:
             embed.add_field(name="Status", value="Active", inline=False)
         else:
@@ -267,6 +265,18 @@ class Topic:
         else:
             embed.add_field(name="Members", value="No members joined yet", inline=False)
         embed.add_field(name="** **", value=f"Start time: {discord.utils.format_dt(start_time_dt_utc, 'f')} in your timezone", inline=False)
+        return embed
+    
+    @staticmethod
+    async def createTopicsListEmbed(topics: List[aiosqlite.Row], title="Topics"):
+        embed = discord.Embed(title=title, color=discord.Color.green())
+        for topic in topics:
+            start_time = topic[3]
+            start_time_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+            start_time_dt_utc = start_time_dt.replace(tzinfo=pytz.utc)
+            time_remaining = discord.utils.format_dt(start_time_dt_utc, 'R')
+            status = 'Starting' if topic[2] == 'upcoming' else 'Started'
+            embed.add_field(name=topic[1], value=f"- Host: <@{topic[5]}>\n- Status: {status} {time_remaining}", inline=False)
         return embed
     
     @staticmethod
@@ -356,8 +366,8 @@ class Utils:
         topic_name = "".join([arg + " " for arg in args if not arg.isdigit()]).strip()
         topic_name = topic_name + "".join([f" {num}" for num in numbers[:-2]])
         args = [topic_name] + [int(num) for num in numbers[-2:]] if numbers else [topic_name, 0, 0]
-        start_time = numbers[0] if len(numbers) > 0 else 0
-        duration = numbers[1] if len(numbers) > 1 else 0
+        start_time = numbers[-2] if len(numbers) > 0 else 0
+        duration = numbers[-1] if len(numbers) > 1 else 0
         return topic_name, start_time, duration
 
 class Attendance:

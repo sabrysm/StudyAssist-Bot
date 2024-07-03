@@ -10,3 +10,4 @@ __pycache__/
 *.sublime-*
 venv/
 bot/config.py
+bot/study.db

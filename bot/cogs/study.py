@@ -148,6 +148,17 @@ class Study(commands.Cog):
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
     
+    @study.command(name='list', description='List all active study sessions')
+    async def list(self, ctx: commands.Context):
+        active_topics = await Topic.getActiveTopics()
+        upcoming_topics = await Topic.getUpcomingTopics()
+        topic_rows = active_topics + upcoming_topics
+        if not topic_rows:
+            await ctx.send('There are no active topics.', ephemeral=True)
+            return
+        embed = await Topic.createTopicsListEmbed(topic_rows)
+        await ctx.send(embed=embed)
+    
         
 async def setup(bot: commands.Bot):
     await bot.add_cog(Study(bot), guilds=[discord.Object(id=config.guild_id)])
