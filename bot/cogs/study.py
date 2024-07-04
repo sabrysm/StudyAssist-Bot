@@ -236,6 +236,34 @@ class Study(commands.Cog):
         await Reminder.newReminder(ctx.author.id, topic_name)
         await ctx.send(f'Reminder is set for the topic: {topic_name}')
     
+    @remind.error
+    async def remind_error(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send('Please provide a topic name.', ephemeral=True)
+        elif isinstance(error, commands.CommandInvokeError):
+            await ctx.send('The topic does not exist.', ephemeral=True)
+            raise error
+        else:
+            await ctx.send('An error occurred. Please try again.', ephemeral=True)
+            
+    @study.command(name='notify', description='Notify members of the current study session')
+    async def notify(self, ctx: commands.Context, *message):
+        message = ' '.join(message)
+        print(f"Notifying Members: {message}")
+        topic_name = await Topic.getTopicNameByAuthor(ctx.author.id)
+        if not topic_name:
+            await ctx.send('You do not have an active topic.', ephemeral=True)
+            return
+        await Topic.notifyTopicMembers(self.bot, topic_name, message)
+    
+    @notify.error
+    async def notify_error(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.CommandInvokeError):
+            await ctx.send('You do not have an active topic.', ephemeral=True)
+            raise error
+        else:
+            await ctx.send('An error occurred. Please try again.', ephemeral=True)
+    
     
         
 async def setup(bot: commands.Bot):

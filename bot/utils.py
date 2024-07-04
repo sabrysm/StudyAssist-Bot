@@ -369,6 +369,22 @@ class Topic:
                 SELECT * FROM topics WHERE author_id=? AND (status='active' OR status='upcoming')
             ''', (author_id,)) as cursor:
                 return await cursor.fetchone() is not None
+    
+    @staticmethod
+    async def getTopicNameByAuthor(author_id: int) -> str:
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT name FROM topics WHERE author_id=? AND (status='active' OR status='upcoming') ORDER BY id DESC LIMIT 1
+            ''', (author_id,)) as cursor:
+                return await cursor.fetchone()
+    
+    @staticmethod
+    async def notifyTopicMembers(bot: discord.Client, topic_name: str, message: str):
+        members = await Topic.getTopicMembers(topic_name)
+        embed = discord.Embed(title=f"Notification for {topic_name}", description=message, color=discord.Color.green())
+        for member in members:
+            member = bot.get_guild(config.guild_id).get_member(member[2])
+            await member.send(embed=embed)
 
 class Reminder:
     @staticmethod
@@ -409,13 +425,6 @@ class Reminder:
         await Reminder.createTableIfNotExists()
         member = bot.get_guild(config.guild_id).get_member(user_id)
         await member.send(f"Reminder: The topic {topic_name} is starting now!")
-    
-    @staticmethod
-    async def notifyTopicMembers(bot: discord.Client, topic_name: str, message: str):
-        members = await Topic.getTopicMembers(topic_name)
-        for member in members:
-            member = bot.get_guild(config.guild_id).get_member(member[2])
-            await member.send(message)
     
     @staticmethod
     async def getReminders():
