@@ -14,13 +14,11 @@ class Tasks(commands.Cog):
     
     @tasks.loop(seconds=config.check_start_times_interval)
     async def check_start_times(self):
-        await Check.checkStartTimes()
+        await Check.checkStartTimes(self.bot)
     
     @tasks.loop(seconds=config.check_end_times_interval)
     async def check_end_times(self):
         await Check.checkEndTimes()
-    
-    
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Tasks(bot), guilds=[discord.Object(id=config.guild_id)])

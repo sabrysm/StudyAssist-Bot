@@ -5,6 +5,39 @@ import aiosqlite
 from datetime import datetime, timedelta
 from typing import List
 import pytz
+import config
+
+class Resource:
+    @staticmethod
+    async def createTableIfNotExists():
+        async with aiosqlite.connect('study.db') as db:
+                # foreign key to the topics table's status column
+            await db.execute('''CREATE TABLE IF NOT EXISTS resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic_name INTEGER,
+                author_id INTEGER,
+                status TEXT,
+                url TEXT NOT NULL,
+                FOREIGN KEY (topic_name) REFERENCES topics(name),
+                FOREIGN KEY (author_id) REFERENCES topics(author_id),
+                FOREIGN KEY (status) REFERENCES topics(status)
+            );''')
+            await db.commit()
+    
+    @staticmethod
+    async def addResource(topic_name: str, author_id: int, status: str, url: str):
+        await Resource.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''INSERT INTO resources (topic_name, author_id, status, url) VALUES (?, ?, ?, ?);''', (topic_name, author_id, status, url))
+            await db.commit()
+    
+    @staticmethod
+    async def getResources(topic_name: str):
+        await Resource.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''SELECT * FROM resources WHERE topic_name=? AND (status='active' OR status='upcoming');''', (topic_name,)) as cursor:
+                return await cursor.fetchall()
+    
 
 class TimeCalculations:
     @staticmethod
@@ -118,6 +151,7 @@ class Topic:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     topic_name TEXT NOT NULL,
                     user_id INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
                     joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -167,7 +201,7 @@ class Topic:
     async def checkIfAuthor(topic_name, author_id):
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
-                SELECT * FROM topics WHERE name=? AND author_id=?
+                SELECT * FROM topics WHERE name=? AND author_id=? AND (status='active' OR status='upcoming')
             ''', (topic_name, author_id)) as cursor:
                 return await cursor.fetchone() is not None
     
@@ -177,6 +211,15 @@ class Topic:
             await db.execute('''
                 INSERT INTO topic_members (topic_name, user_id)
                 VALUES (?, ?)
+            ''', (topic_name, user_id))
+            await db.commit()
+    
+    @staticmethod
+    async def removeTopicMember(topic_name, user_id):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                DELETE FROM topic_members
+                WHERE topic_name=? AND user_id=?
             ''', (topic_name, user_id))
             await db.commit()
     
@@ -276,7 +319,7 @@ class Topic:
             start_time_dt_utc = start_time_dt.replace(tzinfo=pytz.utc)
             time_remaining = discord.utils.format_dt(start_time_dt_utc, 'R')
             status = 'Starting' if topic[2] == 'upcoming' else 'Started'
-            embed.add_field(name=topic[1], value=f"- Host: <@{topic[5]}>\n- Status: {status} {time_remaining}", inline=False)
+            embed.add_field(name=topic[1], value=f"- **Host:** <@{topic[5]}>\n- **Status:** {status} {time_remaining}", inline=False)
         return embed
     
     @staticmethod
@@ -306,10 +349,130 @@ class Topic:
                 WHERE topic_name=? AND user_id=?
             ''', (topic_name, user_id))
             await db.commit()
+    
+    @staticmethod
+    async def createTopicResourcesEmbed(topic_name: str):
+        resources = await Resource.getResources(topic_name)
+        resources = [resource for resource in resources if resource[3] == 'active' or resource[3] == 'upcoming']
+        embed = discord.Embed(title=f"Resources for {topic_name}", color=discord.Color.green())
+        if len(resources) == 0:
+            embed.description = "No resources found for this topic"
+        else:
+            for resource in resources:
+                embed.add_field(name=f"** **", value=f"- [Resource {resources.index(resource) + 1}]({resource[4]})", inline=False)
+        return embed
+
+    @staticmethod
+    async def authorHasActiveOrUpcomingTopic(author_id: int) -> bool:
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM topics WHERE author_id=? AND (status='active' OR status='upcoming')
+            ''', (author_id,)) as cursor:
+                return await cursor.fetchone() is not None
+
+class Reminder:
+    @staticmethod
+    async def createTableIfNotExists():
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    topic_name TEXT NOT NULL,
+                    FOREIGN KEY (topic_name) REFERENCES topics(name)
+                )
+            ''')
+            await db.commit()
+    
+    @staticmethod
+    async def newReminder(user_id: int, topic_name: str):
+        await Reminder.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                INSERT INTO reminders (user_id, topic_name)
+                VALUES (?, ?)
+            ''', (user_id, topic_name))
+            await db.commit()
+    
+    @staticmethod
+    async def createReminder(user_id: int, topic_name: str):
+        await Reminder.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                INSERT INTO reminders (user_id, topic_name)
+                VALUES (?, ?)
+            ''', (user_id, topic_name))
+            await db.commit()
+    
+    @staticmethod
+    async def sendReminder(bot: discord.Client, user_id: int, topic_name: str):
+        await Reminder.createTableIfNotExists()
+        member = bot.get_guild(config.guild_id).get_member(user_id)
+        await member.send(f"Reminder: The topic {topic_name} is starting now!")
+    
+    @staticmethod
+    async def notifyTopicMembers(bot: discord.Client, topic_name: str, message: str):
+        members = await Topic.getTopicMembers(topic_name)
+        for member in members:
+            member = bot.get_guild(config.guild_id).get_member(member[2])
+            await member.send(message)
+    
+    @staticmethod
+    async def getReminders():
+        await Reminder.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM reminders
+            ''') as cursor:
+                return await cursor.fetchall()
+    
+    @staticmethod
+    async def deleteReminder(user_id: int, topic_name: str):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                DELETE FROM reminders
+                WHERE user_id=? AND topic_name=?
+            ''', (user_id, topic_name))
+            await db.commit()
+    
+    @staticmethod
+    async def getRemindersByUser(user_id: int):
+        await Reminder.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM reminders WHERE user_id=?
+            ''', (user_id,)) as cursor:
+                return await cursor.fetchall()
+    
+    @staticmethod
+    async def getRemindersByTopic(topic_name: str):
+        await Reminder.createTableIfNotExists()
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM reminders WHERE topic_name=?
+            ''', (topic_name,)) as cursor:
+                return await cursor.fetchall()
+    
+    @staticmethod
+    async def deleteRemindersByTopic(topic_name: str):
+        async with aiosqlite.connect('study.db') as db:
+            await db.execute('''
+                DELETE FROM reminders
+                WHERE topic_name=?
+            ''', (topic_name,))
+            await db.commit()
+    
+    @staticmethod
+    async def reminderExists(user_id: int, topic_name: str):
+        async with aiosqlite.connect('study.db') as db:
+            async with db.execute('''
+                SELECT * FROM reminders WHERE user_id=? AND topic_name=?
+            ''', (user_id, topic_name)) as cursor:
+                return await cursor.fetchone() is not None
 
 class Check:
     @staticmethod
-    async def checkStartTimes():
+    async def checkStartTimes(bot: commands.Bot):
         """
         Check the starting times for upcoming topics
         
@@ -326,6 +489,10 @@ class Check:
             if start_time <= current_time:
                 print(f"Starting topic: {topic[1]}")
                 await Topic.startTopic(topic[1], topic[5])
+                reminders = await Reminder.getRemindersByTopic(topic[1])
+                for reminder in reminders:
+                    await Reminder.sendReminder(bot, reminder[1], reminder[2])
+                await Reminder.deleteRemindersByTopic(topic[1])
     
     @staticmethod
     async def checkEndTimes():
@@ -347,8 +514,12 @@ class Check:
             current_time = discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')
             # Check if the duration has passed
             if TimeCalculations.timeDifference(datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S'), datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')) >= duration * 60:
-                print(f"Ending topic: {topic[1]}")
-                await Topic.endTopic(topic[1], topic[5])
+                topic_name = topic[1]
+                print(f"Ending topic: {topic_name}")
+                await Topic.endTopic(topic_name, topic[5])
+                topic_members = await Topic.getTopicMembers(topic_name)
+                for member in topic_members:
+                    await Topic.removeTopicMember(topic_name, member[2])
 
 class Utils:
     @staticmethod
@@ -401,3 +572,5 @@ class Attendance:
                 SELECT * FROM attendances
             ''') as cursor:
                 return await cursor.fetchall()
+    
+    
