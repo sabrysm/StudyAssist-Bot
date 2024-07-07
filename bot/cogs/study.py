@@ -16,7 +16,7 @@ class Study(commands.Cog):
         if ctx.invoked_subcommand is None:
             await ctx.send('Invalid study command. Please use `!study <command> <topic>` to create a new study session.', ephemeral=True)
     
-    @study.command(name='create', description='Create a new study session')
+    @study.command(name='create', description='Create a new study session', help='Create a new study session')
     async def create(self, ctx: commands.Context, *args):
         topic_name, start_time, duration = Utils.parseCreateArgs(args)
         print(f"Topic: {topic_name}, Start Time: {start_time}, Duration: {duration}")
@@ -54,7 +54,7 @@ class Study(commands.Cog):
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
     
-    @study.command(name='details', description='Get details of the current study session')
+    @study.command(name='details', description='Get details of the current study session', help='Get details of the current study session')
     async def details(self, ctx: commands.Context, *topic_name):
         topic_name = ' '.join(topic_name)
         print(f"Details for Topic: {topic_name}")
@@ -75,7 +75,7 @@ class Study(commands.Cog):
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
     
-    @study.command(name='join', description='Join the current study session')
+    @study.command(name='join', description='Join the current study session', help='Join the current study session')
     async def join(self, ctx: commands.Context, *topic_name):
         topic_name = ' '.join(topic_name)
         print(f"Joining Topic: {topic_name}")
@@ -105,7 +105,7 @@ class Study(commands.Cog):
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
             
-    @study.command(name='leave', description='Leave the current study session')
+    @study.command(name='leave', description='Leave the current study session', help='Leave the current study session')
     async def leave(self, ctx: commands.Context, *topic_name):
         topic_name = ' '.join(topic_name)
         print(f"Leaving Topic: {topic_name}")
@@ -134,8 +134,8 @@ class Study(commands.Cog):
             raise error
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
-            
-    @study.command(name='end', description='End the current study session')
+
+    @study.command(name='end', description='End the current study session', help='End the current study session')
     async def end(self, ctx: commands.Context, *topic_name):
         topic_name = ' '.join(topic_name)
         print(f"Ending Topic: {topic_name}")
@@ -164,7 +164,7 @@ class Study(commands.Cog):
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
     
-    @study.command(name='list', description='List all active study sessions')
+    @study.command(name='list', description='List all active study sessions', help='List all active study sessions')
     async def list(self, ctx: commands.Context):
         active_topics = await Topic.getActiveTopics()
         upcoming_topics = await Topic.getUpcomingTopics()
@@ -182,8 +182,8 @@ class Study(commands.Cog):
             raise error
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
-            
-    @study.command(name='resources', description='Add resources to the current study session')
+
+    @study.command(name='resources', description='Add resources to the current study session', help='Add resources to the current study session')
     async def resources(self, ctx: commands.Context, *args):
         topic_name = ' '.join(args)
         print(f"Adding Resources to Topic: {topic_name}")
@@ -191,11 +191,11 @@ class Study(commands.Cog):
         if not topic_row:
             await ctx.send('The topic does not exist.', ephemeral=True)
             return
+        is_author = await Topic.checkIfAuthor(topic_name, ctx.author.id)
         is_member = await Topic.checkIfAlreadyJoined(topic_name, ctx.author.id)
-        if not is_member:
+        if not is_member and not is_author:
             await ctx.send('You are not a member of the topic. Please join the topic to view resources.')
             return
-        is_author = await Topic.checkIfAuthor(topic_name, ctx.author.id)
         view = AddResourceView(topic_name, ctx.author.id, topic_row[2])
         embed = await Topic.createTopicResourcesEmbed(topic_name)
         if is_author:
@@ -212,8 +212,8 @@ class Study(commands.Cog):
             raise error
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
-            
-    @study.command(name='remind', description='Remind member of the current study session')
+
+    @study.command(name='remind', description='Remind member of the current study session', help='Remind members of the current study session')
     async def remind(self, ctx: commands.Context, *topic_name):
         topic_name = ' '.join(topic_name)
         print(f"Reminding Members of Topic: {topic_name}")
@@ -245,15 +245,15 @@ class Study(commands.Cog):
             raise error
         else:
             await ctx.send('An error occurred. Please try again.', ephemeral=True)
-            
-    @study.command(name='notify', description='Notify members of the current study session')
+
+    @study.command(name='notify', description='Notify members of the current study session', help='Notify members of the current study session')
     async def notify(self, ctx: commands.Context, *message):
-        message = ' '.join(message)
-        print(f"Notifying Members: {message}")
+        message = ' '.join(list(message))
         topic_name = await Topic.getTopicNameByAuthor(ctx.author.id)
         if not topic_name:
             await ctx.send('You do not have an active topic.', ephemeral=True)
             return
+        print(f"Notifying Members: {message}")
         await Topic.notifyTopicMembers(self.bot, topic_name, message)
     
     @notify.error

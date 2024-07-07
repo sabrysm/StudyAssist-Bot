@@ -224,7 +224,7 @@ class Topic:
             await db.commit()
     
     @staticmethod
-    async def getTopicMembers(topic_name) -> List[aiosqlite.Row]:
+    async def getTopicMembers(topic_name: str) -> List[aiosqlite.Row]:
         await Topic.createTablesIfNotExists()
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
@@ -376,15 +376,18 @@ class Topic:
             async with db.execute('''
                 SELECT name FROM topics WHERE author_id=? AND (status='active' OR status='upcoming') ORDER BY id DESC LIMIT 1
             ''', (author_id,)) as cursor:
-                return await cursor.fetchone()
+                row = await cursor.fetchone()
+                return row[0] if row else None
     
     @staticmethod
     async def notifyTopicMembers(bot: discord.Client, topic_name: str, message: str):
         members = await Topic.getTopicMembers(topic_name)
+        members = [member for member in members if member[3] == 'active']
         embed = discord.Embed(title=f"Notification for {topic_name}", description=message, color=discord.Color.green())
         for member in members:
-            member = bot.get_guild(config.guild_id).get_member(member[2])
-            await member.send(embed=embed)
+            member = await bot.fetch_user(member[2])
+            if member:
+                await member.send(embed=embed)
 
 class Reminder:
     @staticmethod
@@ -423,7 +426,7 @@ class Reminder:
     @staticmethod
     async def sendReminder(bot: discord.Client, user_id: int, topic_name: str):
         await Reminder.createTableIfNotExists()
-        member = bot.get_guild(config.guild_id).get_member(user_id)
+        member = await bot.fetch_user(user_id)
         await member.send(f"Reminder: The topic {topic_name} is starting now!")
     
     @staticmethod
@@ -473,6 +476,7 @@ class Reminder:
     
     @staticmethod
     async def reminderExists(user_id: int, topic_name: str):
+        await Reminder.createTableIfNotExists()
         async with aiosqlite.connect('study.db') as db:
             async with db.execute('''
                 SELECT * FROM reminders WHERE user_id=? AND topic_name=?
